@@ -7,7 +7,7 @@
                  [http-kit "2.1.16"]
                  [org.clojure/math.combinatorics "0.0.8"]
                  [enlive "1.1.5"]
-                 [0.1.346.0-17112a-alpha]]
+                 [org.clojure/core.async "0.1.346.0-17112a-alpha"]]
   :main ^:skip-aot httpprobe.core
   :target-path "target/%s"
   :profiles {:uberjar {:aot :all}})

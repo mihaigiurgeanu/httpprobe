@@ -5,6 +5,8 @@
   (-> html-source java.io.StringReader. html/html-resource))
 
 (defn extract-title [body]
-  (-> (html/select (parse-html body) [:title])
-      (html/text)))
+  (try
+    (when-let [title (html/select (parse-html body) [:title])]
+      (html/text title))
+    (catch java.lang.Exception e (.getMessage e))))
 
