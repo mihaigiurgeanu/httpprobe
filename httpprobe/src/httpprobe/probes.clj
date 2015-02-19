@@ -3,8 +3,8 @@
             [clojure.core.async :refer [chan go go-loop <! >! close! >!! <!!]])
   (:use [httpprobe.parser :only [extract-title]]))
 
-(def ^:dynamic *channel*)
-(def ^:dynamic *control-channel*)
+(def ^:dynamic *permissions-channel*)
+(def ^:dynamic *responses-channel*)
 
 (defn- make-url
  "Create an http URL from a host address and a path."
@@ -25,30 +25,44 @@
                 error
                 (extract-title body))))
 
-(defn send-probes
-  "Takes a list of hosts and a list of paths. Sends
-  GET requests to all the paths for each and every
-  hosts in the list. Retrieves info if the path si valid
-  link and, if yes, gets the title of the page"
-  [hosts paths batch-size]
-  (println "Sending probes:" (.toString (java.util.Date.)))
-  (binding [*channel* (chan batch-size)
-            *control-channel* (chan)]
-    (let [requests (mapcat #(send-probes-to-host % paths) hosts)]
-      (go-loop [unprocessed-requests requests]
-               (if (empty? unprocessed-requests)
-                 (>!! *control-channel* "Done")
-                 (let [[next-req & rest-of-reqs] unprocessed-requests]
-                   (>! *channel* next-req)
-                   (recur rest-of-reqs))))
-      (go-loop [] 
-               (try (let [req (<! *channel*)]
-                        (display-response req))
-                   (catch java.lang.Exception e (println (.getMessage e))))
-               (recur))
-        (<!! *control-channel*)
-        (close! *channel*)
-        (close! *control-channel*)
-        (println "Done: " (.toString(java.util.Date.))))))
+(defn- process-request 
+    "Creates a future that waits for the request to finish, writes the response to the responses
+    channel and a permission to the permissions channel."
+    [r]
+    (future
+        (try
+            (let [response @r]
+                (>!! *permissions-channel* response)
+                (>!! *responses-channel* response))
+            (catch Exception e (do (>!! *permissions-channel* e)
+                                   (println (.getMessage e)))))))
 
+(defn send-probes
+    "Takes a list of hosts and a list of paths. Sends
+    GET requests to all the paths for each and every
+    hosts in the list. Retrieves info if the path si valid
+    link and, if yes, gets the title of the page"
+    [hosts paths batch-size]
+    (println "Sending probes:" (.toString (java.util.Date.)))
+    (binding [*permissions-channel* (chan)
+              *responses-channel* (chan)]
+        (let [requests (mapcat #(send-probes-to-host % paths) hosts)
+              first-batch (take batch-size requests)
+              rest-batch (drop batch-size requests)]
+            (doseq [r first-batch]
+                (process-request r))
+            (go-loop [unprocessed-requests rest-batch] 
+                     (if-let [[req & reqs] unprocessed-requests]
+                         (do
+                             (let [permission (<! *permissions-channel*)]
+                                 (process-request req))
+                             (recur reqs))
+                         (do
+                             (println "All requests enqued" (.toString (java.util.Date.)))
+                             (close! *permissions-channel*)
+                             (close! *responses-channel*))))
+            (loop []
+                (when-let [response (<!! *responses-channel*)]
+                    (display-response response)))
+            (println "Done!" (.toString (java.util.Date.))))))
 
