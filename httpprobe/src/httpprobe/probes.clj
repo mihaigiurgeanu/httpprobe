@@ -5,15 +5,28 @@
 
 (def ^:dynamic *permissions-channel*)
 (def ^:dynamic *responses-channel*)
+(def ^:dynamic *http-options* {})
+(def ^:dynamic *pending-requests*)
 
 (defn- make-url
  "Create an http URL from a host address and a path."
  [host path]
  (str "http://" host path))
 
-(defn- create-request [host path]
-    (println (str "Sending request to " host ": " path) (.toString (java.util.Date.)))
-    (http/get (make-url host path)))
+(defn- create-request [{:keys [host path]}]
+    (let [permissions-channel *permissions-channel*
+          responses-channel *responses-channel*
+          pending-requests *pending-requests*
+          this-request-promise (promise)]
+        (println "Sending request to " host path)
+        (send pending-requests conj this-request-promise)
+        (http/get (make-url host path) *http-options*
+                  (fn [response]
+                      (println "Received response for " host path)
+                      (let [receiveddate (java.util.Date.)]
+                          (>!! permissions-channel receiveddate)
+                          (>!! responses-channel response)
+                          (deliver this-request-promise receiveddate))))))
 
 (defn- display-response
     [{:keys [opts body status headers error]}]
@@ -23,18 +36,6 @@
                  error
                  (extract-title body))))
 
-(defn- process-request 
-    "Creates a future that waits for the request to finish, writes the response to the responses
-    channel and a permission to the permissions channel."
-    [r]
-    (future
-        (try
-            (let [response @r]
-                (>!! *permissions-channel* response)
-                (>!! *responses-channel* response))
-            (catch Exception e (do (>!! *permissions-channel* e)
-                                   (println (.getMessage e)))))))
-
 (defn send-probes
     "Takes a list of hosts and a list of paths. Sends
     GET requests to all the paths for each and every
@@ -43,24 +44,34 @@
     [hosts paths batch-size]
     (println "Sending probes:" (.toString (java.util.Date.)))
     (binding [*permissions-channel* (chan)
-              *responses-channel* (chan)]
-        (let [requests (for [h hosts p paths] (create-request h p))
+              *responses-channel* (chan)
+              *pending-requests* (agent [])]
+        (let [requests (for [h hosts p paths] {:host h :path p})
               first-batch (take batch-size requests)
-              rest-batch (drop batch-size requests)]
+              rest-batch (drop batch-size requests)
+              requests-finished (agent false)]
             (doseq [r first-batch]
-                (process-request r))
+                (create-request r))
             (go-loop [unprocessed-requests rest-batch] 
-                     (if-let [[req & reqs] unprocessed-requests]
-                         (do
-                             (let [permission (<! *permissions-channel*)]
-                                 (process-request req))
-                             (recur reqs))
+                     (if (not-empty unprocessed-requests) 
+                         (let [[req & reqs] unprocessed-requests]
+                             (do
+                                 (println "Waiting permission to send request to" (:host req) (:path req))
+                                 (let [permission (<! *permissions-channel*)]
+                                     (create-request req))
+                                 (recur reqs)))
                          (do
                              (println "All requests enqued" (.toString (java.util.Date.)))
-                             (close! *permissions-channel*)
-                             (close! *responses-channel*))))
+                             (send requests-finished (fn [state] true)))))
+            (go-loop [] (when-let [permission (<! *permissions-channel*)]
+                            (recur)))
             (loop []
                 (when-let [response (<!! *responses-channel*)]
-                    (display-response response)))
-            (println "Done!" (.toString (java.util.Date.))))))
+                    (display-response response)
+                    (when (or (not @requests-finished) (not-every? realized? @*pending-requests*))
+                        (recur)))) 
+            (println "Done!" (.toString (java.util.Date.)))
+            (close! *permissions-channel*)
+            (close! *responses-channel*)
+            (shutdown-agents))))
 
