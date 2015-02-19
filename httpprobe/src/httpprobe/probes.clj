@@ -17,10 +17,11 @@
 
 (defn- display-response
     [{:keys [opts body status headers error]}]
-    (println (if trace-redirects (str trace-redirects "->" url) url)
-             status
-             error
-             (extract-title body)))
+    (let [{:keys [url trace-redirects]} opts]
+        (println (if trace-redirects (str trace-redirects "->" url) url)
+                 status
+                 error
+                 (extract-title body))))
 
 (defn- process-request 
     "Creates a future that waits for the request to finish, writes the response to the responses
@@ -62,4 +63,6 @@
                 (when-let [response (<!! *responses-channel*)]
                     (display-response response)))
             (println "Done!" (.toString (java.util.Date.))))))
+
+           (println "Done!" (.toString (java.util.Date.))))))
 
