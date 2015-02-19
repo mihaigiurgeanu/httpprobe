@@ -11,19 +11,16 @@
  [host path]
  (str "http://" host path))
 
-(defn- send-probes-to-host [host paths]
-  (println "Sending probes to host" host)
-  (let [urls (map #(make-url host %) paths)]
-    (map http/get urls)))
+(defn- create-request [host path]
+    (println (str "Sending request to " host ": " path) (.toString (java.util.Date.)))
+    (http/get (make-url host path)))
 
 (defn- display-response
-  [request]
-  (let [{:keys [opts body status headers error]} @request
-           {:keys [url trace-redirects]} opts]
-       (println (if trace-redirects (str trace-redirects "->" url) url)
-                status
-                error
-                (extract-title body))))
+    [{:keys [opts body status headers error]}]
+    (println (if trace-redirects (str trace-redirects "->" url) url)
+             status
+             error
+             (extract-title body)))
 
 (defn- process-request 
     "Creates a future that waits for the request to finish, writes the response to the responses
@@ -46,7 +43,7 @@
     (println "Sending probes:" (.toString (java.util.Date.)))
     (binding [*permissions-channel* (chan)
               *responses-channel* (chan)]
-        (let [requests (mapcat #(send-probes-to-host % paths) hosts)
+        (let [requests (for [h hosts p paths] (create-request h p))
               first-batch (take batch-size requests)
               rest-batch (drop batch-size requests)]
             (doseq [r first-batch]
