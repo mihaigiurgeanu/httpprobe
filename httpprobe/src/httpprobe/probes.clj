@@ -31,7 +31,7 @@
   hosts in the list. Retrieves info if the path si valid
   link and, if yes, gets the title of the page"
   [hosts paths batch-size]
-  (println "Start:" (.toString (java.util.Date.)))
+  (println "Sending probes:" (.toString (java.util.Date.)))
   (binding [*channel* (chan batch-size)
             *control-channel* (chan)]
     (let [requests (mapcat #(send-probes-to-host % paths) hosts)]
@@ -41,12 +41,14 @@
                  (let [[next-req & rest-of-reqs] unprocessed-requests]
                    (>! *channel* next-req)
                    (recur rest-of-reqs))))
-      (go (try (let [req (<! *channel*)]
-                 (display-response req))
-            (catch java.lang.Exception e (println (.getMessage e)))))
-      (<!! *control-channel*)
-      (close! *channel*)
-      (close! *control-channel*)
-      (println "Done: " (.toString(java.util.Date.))))))
+      (go-loop [] 
+               (try (let [req (<! *channel*)]
+                        (display-response req))
+                   (catch java.lang.Exception e (println (.getMessage e))))
+               (recur))
+        (<!! *control-channel*)
+        (close! *channel*)
+        (close! *control-channel*)
+        (println "Done: " (.toString(java.util.Date.))))))
 
 
