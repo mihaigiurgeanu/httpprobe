@@ -1,6 +1,6 @@
 (ns httpprobe.probes
   (:require [org.httpkit.client :as http]
-            [clojure.core.async :refer [chan go go-loop <! >! close! >!! <!!]])
+            [clojure.core.async :refer [chan go go-loop <! close! put! <!!]])
   (:use [httpprobe.parser :only [extract-title]]))
 
 (def ^:dynamic *permissions-channel*)
@@ -20,13 +20,22 @@
           this-request-promise (promise)]
         (println "Sending request to " host path)
         (send pending-requests conj this-request-promise)
-        (http/get (make-url host path) *http-options*
-                  (fn [response]
-                      (println "Received response for " host path)
-                      (let [receiveddate (java.util.Date.)]
-                          (>!! permissions-channel receiveddate)
-                          (>!! responses-channel response)
-                          (deliver this-request-promise receiveddate))))))
+        (try
+            (http/get (make-url host path) *http-options*
+                      (fn [response]
+                          (println "Received response for " host path)
+                          
+                          (try
+                              (let [receiveddate (java.util.Date.)]
+                                  (put! permissions-channel receiveddate)
+                                  (put! responses-channel response)
+                                  (deliver this-request-promise receiveddate))
+                              (catch Exception e (println "Exception sending permission and response" (.getMessage e))))))
+            (catch Exception e (do
+                                   (println "Exception creating a request for" host path (.getMessage e))
+                                   (let [receiveddate (java.util.Date.)]
+                                       (put! permissions-channel receiveddate)
+                                       (deliver this-request-promise receiveddate)))))))
 
 (defn- display-response
     [{:keys [opts body status headers error]}]
@@ -67,7 +76,7 @@
                             (recur)))
             (loop []
                 (when-let [response (<!! *responses-channel*)]
-                    (display-response response)
+                    ;(display-response response)
                     (when (or (not @requests-finished) (not-every? realized? @*pending-requests*))
                         (recur)))) 
             (println "Done!" (.toString (java.util.Date.)))
