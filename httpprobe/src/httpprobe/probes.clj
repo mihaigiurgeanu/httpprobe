@@ -1,6 +1,7 @@
 (ns httpprobe.probes
   (:require [org.httpkit.client :as http]
-            [clojure.core.async :refer [chan go go-loop <! close! put! <!!]])
+            [clojure.core.async :refer [chan go go-loop <! close! put! <!!]]
+            [httporbe.timer :as timer])
   (:use [httpprobe.parser :only [extract-title]]))
 
 (def ^:dynamic *permissions-channel*)
@@ -34,12 +35,15 @@
           (deliver this-request-promise 1)))))
 
 (defn- display-response
-  [{:keys [opts body status headers error]}]
+  [{:keys [opts body status headers error response-number]}]
   (let [{:keys [url trace-redirects]} opts]
-    (println (if trace-redirects (str trace-redirects "->" url) url)
-             status
-             error
-             (extract-title body))))
+    (println
+     response-number
+     (ms)
+     (if trace-redirects (str trace-redirects "->" url) url)
+     status
+     error
+     (extract-title body))))
 
 (defn send-probes
   "Takes a list of hosts and a list of paths. Sends
@@ -53,8 +57,7 @@
     (let [requests (for [h hosts p paths] {:host h :path p})
           first-batch (take batch-size requests)
           rest-batch (drop batch-size requests)
-          requests-finished (agent false)
-          start-time (System/nanoTime)]
+          requests-finished (agent false)]
       (doseq [r first-batch]
         (create-request r))
       (go-loop [unprocessed-requests rest-batch process-list true]
@@ -69,12 +72,13 @@
                        (recur nil false)))
                    (when permission (recur nil false)))))
 
-      (loop []
+      (loop [i 0]
         (when-let [response (<!! *responses-channel*)]
+          (assoc response response-number i)
           (display-response response)
           (when (or (not @requests-finished) (not-every? realized? @*pending-requests*))
-            (recur))))
-      (println "Done!" (/(- (System/nanoTime) start-time) 1000000) "ms")
+            (recur (+ i 1)))))
+      (println "Done!" (timer/ms))
       (close! *permissions-channel*)
       (close! *responses-channel*)
       (shutdown-agents))))
