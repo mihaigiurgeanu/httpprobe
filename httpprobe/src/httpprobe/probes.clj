@@ -64,5 +64,3 @@
                     (display-response response)))
             (println "Done!" (.toString (java.util.Date.))))))
 
-           (println "Done!" (.toString (java.util.Date.))))))
-
