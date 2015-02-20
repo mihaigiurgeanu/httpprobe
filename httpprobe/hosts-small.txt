@@ -1,0 +1,9 @@
+www.google.com
+127.0.0.1
+www.genesissoftware.ro
+www.genesissoftware.eu
+www.hbo.com
+www.hbo.ro
+www.reddis.com
+192.168.0.1
+localhost

@@ -62,15 +62,18 @@
 
       ;; Setting up the display loop
       (go-loop [i 0]
-        (when-let [response (<! *responses-channel*)]
-          (display-response i response)
-          (if (or (not @requests-finished) (not-every? realized? @*pending-requests*))
-            (recur (+ i 1))
-            (do
-              (println (timer/ms) "Done!")
-              (close! *permissions-channel*)
-              (close! *responses-channel*)
-              (shutdown-agents)))))
+        (if-let [response (<! *responses-channel*)]
+          (do
+            (display-response i response)
+            (send *pending-requests* (fn [state] (filter #(not (realized? %)) state)))
+            (when (and @requests-finished (every? realized? @*pending-requests*))
+              (close! *responses-channel*))
+            (recur (+ i 1)))
+          (do
+            (println (timer/ms) "Done!")
+            (close! *permissions-channel*)
+            (close! *responses-channel*)
+            (shutdown-agents))))
 
 
       (println (timer/ms) "Start")
