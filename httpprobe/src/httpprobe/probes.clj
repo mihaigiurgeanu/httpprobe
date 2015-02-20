@@ -62,7 +62,7 @@
 
       ;; Setting up the display loop
       (go-loop [i 0]
-        (when-let [response (<!! *responses-channel*)]
+        (when-let [response (<! *responses-channel*)]
           (display-response i response)
           (if (or (not @requests-finished) (not-every? realized? @*pending-requests*))
             (recur (+ i 1))
@@ -78,7 +78,7 @@
         (create-request r))
 
       (loop [unprocessed-requests rest-batch process-list true]
-        (let [permission (<! *permissions-channel*)]
+        (let [permission (<!! *permissions-channel*)]
           (if process-list
             (if (not-empty unprocessed-requests)
               (let [[req & reqs] unprocessed-requests]
