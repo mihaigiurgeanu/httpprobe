@@ -1,7 +1,7 @@
 (ns httpprobe.probes
   (:require [org.httpkit.client :as http]
             [clojure.core.async :refer [chan go go-loop <! close! put! <!!]]
-            [httporbe.timer :as timer])
+            [httpprobe.timer :as timer])
   (:use [httpprobe.parser :only [extract-title]]))
 
 (def ^:dynamic *permissions-channel*)
@@ -39,7 +39,7 @@
   (let [{:keys [url trace-redirects]} opts]
     (println
      response-number
-     (ms)
+     (timer/ms)
      (if trace-redirects (str trace-redirects "->" url) url)
      status
      error
@@ -58,6 +58,7 @@
           first-batch (take batch-size requests)
           rest-batch (drop batch-size requests)
           requests-finished (agent false)]
+      (println (timer/ms) "Start")
       (doseq [r first-batch]
         (create-request r))
       (go-loop [unprocessed-requests rest-batch process-list true]
@@ -74,11 +75,11 @@
 
       (loop [i 0]
         (when-let [response (<!! *responses-channel*)]
-          (assoc response response-number i)
+          (assoc response :response-number i)
           (display-response response)
           (when (or (not @requests-finished) (not-every? realized? @*pending-requests*))
             (recur (+ i 1)))))
-      (println "Done!" (timer/ms))
+      (println (timer/ms) "Done!")
       (close! *permissions-channel*)
       (close! *responses-channel*)
       (shutdown-agents))))
