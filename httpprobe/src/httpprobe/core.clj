@@ -6,6 +6,6 @@
 (defn -main
   [& args]
   (with-open [config-file (java.io.PushbackReader. (reader "httpprobe.conf"))]
-    (let [{:keys [hosts-file paths batch-size]} (read config-file)]
+    (let [{:keys [hosts-file paths batch-size http-options]} (read config-file)]
       (with-open [rdr (clojure.java.io/reader hosts-file)]
-        (send-probes (line-seq rdr) paths batch-size)))))
+        (send-probes (line-seq rdr) paths batch-size http-options)))))

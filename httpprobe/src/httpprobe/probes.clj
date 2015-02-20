@@ -50,10 +50,11 @@
   GET requests to all the paths for each and every
   hosts in the list. Retrieves info if the path si valid
   link and, if yes, gets the title of the page"
-  [hosts paths batch-size]
+  [hosts paths batch-size http-options]
   (binding [*permissions-channel* (chan batch-size)
             *responses-channel* (chan batch-size)
-            *pending-requests* (agent [])]
+            *pending-requests* (agent [])
+            *http-options* http-options]
     (let [requests (for [h hosts p paths] {:host h :path p})
           first-batch (take batch-size requests)
           rest-batch (drop batch-size requests)
