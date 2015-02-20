@@ -35,11 +35,11 @@
           (deliver this-request-promise 1)))))
 
 (defn- display-response
-  [{:keys [opts body status headers error response-number]}]
+  [response-number {:keys [opts body status headers error]}]
   (let [{:keys [url trace-redirects]} opts]
     (println
-     response-number
      (timer/ms)
+     response-number
      (if trace-redirects (str trace-redirects "->" url) url)
      status
      error
@@ -75,8 +75,7 @@
 
       (loop [i 0]
         (when-let [response (<!! *responses-channel*)]
-          (assoc response :response-number i)
-          (display-response response)
+          (display-response i response)
           (when (or (not @requests-finished) (not-every? realized? @*pending-requests*))
             (recur (+ i 1)))))
       (println (timer/ms) "Done!")
