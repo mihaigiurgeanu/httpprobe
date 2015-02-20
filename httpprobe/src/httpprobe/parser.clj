@@ -6,7 +6,7 @@
 
 (defn extract-title [body]
   (try
-    (when-let [title (html/select (parse-html body) [:title])]
+    (when-let [title (first (html/select (parse-html body) [:title]))]
       (html/text title))
     (catch java.lang.Exception e (.getMessage e))))
 
