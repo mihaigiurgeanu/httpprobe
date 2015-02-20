@@ -59,27 +59,32 @@
           first-batch (take batch-size requests)
           rest-batch (drop batch-size requests)
           requests-finished (agent false)]
+
+      ;; Setting up the display loop
+      (go-loop [i 0]
+        (when-let [response (<!! *responses-channel*)]
+          (display-response i response)
+          (if (or (not @requests-finished) (not-every? realized? @*pending-requests*))
+            (recur (+ i 1))
+            (do
+              (println (timer/ms) "Done!")
+              (close! *permissions-channel*)
+              (close! *responses-channel*)
+              (shutdown-agents)))))
+
+
       (println (timer/ms) "Start")
       (doseq [r first-batch]
         (create-request r))
-      (go-loop [unprocessed-requests rest-batch process-list true]
-               (let [permission (<! *permissions-channel*)]
-                 (if process-list
-                   (if (not-empty unprocessed-requests)
-                     (let [[req & reqs] unprocessed-requests]
-                       (create-request req)
-                       (recur reqs true))
-                     (do
-                       (send requests-finished (fn [state] true))
-                       (recur nil false)))
-                   (when permission (recur nil false)))))
 
-      (loop [i 0]
-        (when-let [response (<!! *responses-channel*)]
-          (display-response i response)
-          (when (or (not @requests-finished) (not-every? realized? @*pending-requests*))
-            (recur (+ i 1)))))
-      (println (timer/ms) "Done!")
-      (close! *permissions-channel*)
-      (close! *responses-channel*)
-      (shutdown-agents))))
+      (loop [unprocessed-requests rest-batch process-list true]
+        (let [permission (<! *permissions-channel*)]
+          (if process-list
+            (if (not-empty unprocessed-requests)
+              (let [[req & reqs] unprocessed-requests]
+                (create-request req)
+                (recur reqs true))
+              (do
+                (send requests-finished (fn [state] true))
+                (recur nil false)))
+            (when permission (recur nil false))))))))
