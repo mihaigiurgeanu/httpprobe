@@ -8,7 +8,7 @@
 (def ^:dynamic *http-options* {})
 (def ^:dynamic *pending-requests*)
 (def ^:dynamic *responses-count*)
-(def ^:dynamic *responses-channel*)
+(def ^:dynamic *probes-finished*)
 
 (defn- make-url
   "Create an http URL from a host address and a path."
@@ -26,31 +26,51 @@
      error
      (extract-title body))))
 
+(defn- decrement-pending-requests
+  "Decrement the number of pending requests. If this number is
+  0 and the probes finished in the input probes list, then
+  shuts down the current probes sending session."
+  []
+  (swap!
+   *pending-requests*
+   (fn [req-cnt]
+     (let [req-left (- req-cnt 1)]
+       (when (and @*probes-finished* (<= req-left 0))
+         (close! *permissions-channel*))
+       req-left))))
+
 (defn- create-request [{:keys [host path] :as req-pair}]
   (let [permissions-channel *permissions-channel*
-        responses-channel *responses-channel*
         pending-requests *pending-requests*
-        this-request-promise (promise)
-        responses-count *responses-count*]
-    (send pending-requests conj this-request-promise)
+        responses-count *responses-count*
+        probes-finished *probes-finished*
+        out *out*]
+    (swap! pending-requests + 1)
     (try
-      (http/get (make-url host path) *http-options*
-                (fn [response]
-                  (try
-                    (put! permissions-channel req-pair)
-                    (send responses-count
-                          (fn [crt-rsp-no]
-                            (let [this-rsp-no (+ crt-rsp-no 1)]
-                              (display-response this-rsp-no response)
-                              (deliver this-request-promise 1)
-                              (put! responses-channel this-rsp-no)
-                              this-rsp-no)))
-                    (catch Exception e
-                      (println "Exception sending permission and response" (.getMessage e))))))
+      (http/get
+       (make-url host path)
+       *http-options*
+       (fn [response]
+         (binding [*permissions-channel* permissions-channel
+                   *responses-count* responses-count
+                   *probes-finished* probes-finished
+                   *pending-requests* pending-requests
+                   *out* out]
+           (put! permissions-channel req-pair)
+           (send responses-count
+                 (fn [crt-rsp-no]
+                   (let [this-rsp-no (+ crt-rsp-no 1)]
+                     (display-response this-rsp-no response)
+                     (decrement-pending-requests)
+                     this-rsp-no))))))
       (catch Exception e
         (println "Exception creating a request for" host path (.getMessage e))
-          (put! permissions-channel req-pair)
-          (deliver this-request-promise 1)))))
+        (.printStackTrace e)
+        (put! permissions-channel req-pair)
+        (send responses-count
+              (fn [crt-rsp-no]
+                (decrement-pending-requests)
+                (+ 1 crt-rsp-no)))))))
 
 (defn send-probes
   "Takes a list of hosts and a list of paths. Sends
@@ -59,42 +79,29 @@
   link and, if yes, gets the title of the page"
   [hosts paths batch-size http-options]
   (binding [*permissions-channel* (chan batch-size)
-            *responses-channel* (chan batch-size)
-            *pending-requests* (agent [])
+            *pending-requests* (atom 0)
             *http-options* http-options
-            *responses-count* (agent 0)]
-    (let [requests (for [h hosts p paths] {:host h :path p})
-          first-batch (take batch-size requests)
-          rest-batch (drop batch-size requests)
-          requests-finished (agent false)]
-
-      ;; Setting up the control loop
-      (go-loop []
-        (if-let [response-no (<! *responses-channel*)]
-          (do
-            (send *pending-requests* (fn [state] (filter #(not (realized? %)) state)))
-            (when (and @requests-finished (every? realized? @*pending-requests*))
-              (close! *responses-channel*))
-            (recur))
-          (do
-            (println (timer/ms) "Done!")
-            (close! *permissions-channel*)
-            (close! *responses-channel*)
-            (shutdown-agents))))
-
+            *responses-count* (agent 0)
+            *probes-finished* (atom false)]
+    (let [probes (for [h hosts p paths] {:host h :path p})
+          first-batch (take batch-size probes)
+          rest-batch (drop batch-size probes)]
 
       (println (timer/ms) "Start")
       (doseq [r first-batch]
         (create-request r))
 
-      (loop [unprocessed-requests rest-batch process-list true]
+      ;;send the rest of the request
+      (loop [unprocessed-probes rest-batch]
         (let [permission (<!! *permissions-channel*)]
-          (if process-list
-            (if (not-empty unprocessed-requests)
-              (let [[req & reqs] unprocessed-requests]
-                (create-request req)
-                (recur reqs true))
-              (do
-                (send requests-finished (fn [state] true))
-                (recur nil false)))
-            (when permission (recur nil false))))))))
+          (if (not-empty unprocessed-probes)
+            (let [[p & ps] unprocessed-probes]
+              (create-request p)
+              (recur ps))
+            (reset! *probes-finished* true))))
+
+      ;;consume the end of permissions and wait for channel to close
+      (loop []
+        (when (<!! *permissions-channel*) (recur))))
+
+    (println (timer/ms) "Done!" @*responses-count* "http probes processed")))
