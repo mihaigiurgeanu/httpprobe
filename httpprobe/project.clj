@@ -1,4 +1,4 @@
-(defproject httpprobe "0.1.0"
+(defproject httpprobe "0.1.1"
   :description "Sends many http GET request"
   :url "http://example.com/FIXME"
   :license {:name "Eclipse Public License"
