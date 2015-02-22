@@ -44,7 +44,8 @@
         pending-requests *pending-requests*
         responses-count *responses-count*
         probes-finished *probes-finished*
-        out *out*]
+        out *out*
+        err *err*]
     (swap! pending-requests + 1)
     (try
       (http/get
@@ -55,7 +56,8 @@
                    *responses-count* responses-count
                    *probes-finished* probes-finished
                    *pending-requests* pending-requests
-                   *out* out]
+                   *out* out
+                   *err* err]
            (put! permissions-channel req-pair)
            (send responses-count
                  (fn [crt-rsp-no]
@@ -65,7 +67,7 @@
                      this-rsp-no))))))
       (catch Exception e
         (println "Exception creating a request for" host path (.getMessage e))
-        (.printStackTrace e)
+        (.printStackTrace e *err*)
         (put! permissions-channel req-pair)
         (send responses-count
               (fn [crt-rsp-no]
